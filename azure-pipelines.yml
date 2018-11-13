@@ -2,6 +2,11 @@
 # Build your Go project.
 # Add steps that test, save build artifacts, deploy, and more:
 # https://docs.microsoft.com/azure/devops/pipelines/languages/go
+resources:
+  containers:
+    - container: mongoserver
+      image: mongo:3.6-windowsservercore-ltsc2016
+      options: -p 27017:27017
 
 pool:
   vmImage: 'vs2017-win2016'
@@ -13,14 +18,6 @@ variables:
   modulePath: '$(GOPATH)\src\github.com\$(build.repository.name)' # Path to the module's code
 
 steps:
-- task: DockerCompose@0
-  displayName: 'Set up Mongo'
-  inputs:
-    dockerComposeFile: '**/docker-compose.win.yml'
-    action: 'Run A Specific Service'
-    projectName: 'athensdev'
-    serviceName: 'mongo'
-
 - powershell: |
     mkdir "$env:GOBIN"
     mkdir "$env:GOPATH\pkg"
@@ -37,7 +34,7 @@ steps:
     go test -mod=vendor -race ./...
   env:
     ATHENS_MINIO_ENDPOINT: "127.0.0.1:9001"
-    ATHENS_MONGO_STORAGE_URL: "mongodb://127.0.0.1:27017"
+    ATHENS_MONGO_STORAGE_URL: "mongodb://mongoserver:27017"
     MINIO_ACCESS_KEY: "minio"
     MINIO_SECRET_KEY: "minio123"
   workingDirectory: '$(modulePath)'
