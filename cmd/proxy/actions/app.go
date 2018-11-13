@@ -2,12 +2,12 @@ package actions
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/gobuffalo/buffalo"
-	"github.com/gobuffalo/buffalo/middleware"
-	"github.com/gobuffalo/buffalo/middleware/csrf"
-	"github.com/gobuffalo/buffalo/middleware/ssl"
 	"github.com/gobuffalo/buffalo/render"
+	forcessl "github.com/gobuffalo/mw-forcessl"
+	paramlogger "github.com/gobuffalo/mw-paramlogger"
 	"github.com/gomods/athens/pkg/config"
 	"github.com/gomods/athens/pkg/log"
 	mw "github.com/gomods/athens/pkg/middleware"
@@ -33,15 +33,28 @@ func App(conf *config.Config) (*buffalo.App, error) {
 	// ENV is used to help switch settings based on where the
 	// application is being run. Default is "development".
 	ENV := conf.GoEnv
-	store, err := GetStorage(conf.Proxy.StorageType, conf.Storage)
+	store, err := GetStorage(conf.StorageType, conf.Storage)
 	if err != nil {
 		err = fmt.Errorf("error getting storage configuration (%s)", err)
 		return nil, err
 	}
 
+	if conf.GithubToken != "" {
+		if conf.NETRCPath != "" {
+			fmt.Println("Cannot provide both GithubToken and NETRCPath. Only provide one.")
+			os.Exit(1)
+		}
+
+		netrcFromToken(conf.GithubToken)
+	}
+
 	// mount .netrc to home dir
 	// to have access to private repos.
-	initializeNETRC(conf.Proxy.NETRCPath)
+	initializeAuthFile(conf.NETRCPath)
+
+	// mount .hgrc to home dir
+	// to have access to private repos.
+	initializeAuthFile(conf.HGRCPath)
 
 	logLvl, err := logrus.ParseLevel(conf.LogLevel)
 	if err != nil {
@@ -62,11 +75,14 @@ func App(conf *config.Config) (*buffalo.App, error) {
 		},
 		SessionName: "_athens_session",
 		Logger:      blggr,
-		Addr:        conf.Proxy.Port,
+		Addr:        conf.Port,
 		WorkerOff:   true,
-		Host:        "http://127.0.0.1" + conf.Proxy.Port,
+		Host:        "http://127.0.0.1" + conf.Port,
 	})
-	if prefix := conf.Proxy.PathPrefix; prefix != "" {
+
+	app.Use(mw.LogEntryMiddleware(lggr))
+
+	if prefix := conf.PathPrefix; prefix != "" {
 		// certain Ingress Controllers (such as GCP Load Balancer)
 		// can not send custom headers and therefore if the proxy
 		// is running behind a prefix as well as some authentication
@@ -75,46 +91,53 @@ func App(conf *config.Config) (*buffalo.App, error) {
 		app = app.Group(prefix)
 	}
 
-	// Register exporter to export traces
-	exporter, err := observ.RegisterTraceExporter(conf.TraceExporterURL, Service, ENV)
+	// RegisterExporter will register an exporter where we will export our traces to.
+	// The error from the RegisterExporter would be nil if the tracer was specified by
+	// the user and the trace exporter was created successfully.
+	// RegisterExporter returns the function that all traces are flushed to the exporter
+	// and the exporter needs to be stopped. The function should be called when the exporter
+	// is no longer needed.
+	flushTraces, err := observ.RegisterExporter(
+		conf.TraceExporter,
+		conf.TraceExporterURL,
+		Service,
+		ENV,
+	)
 	if err != nil {
 		lggr.Infof("%s", err)
 	} else {
-		defer exporter.Flush()
+		defer flushTraces()
 		app.Use(observ.Tracer(Service))
 	}
 
 	// Automatically redirect to SSL
-	app.Use(ssl.ForceSSL(secure.Options{
-		SSLRedirect:     conf.Proxy.ForceSSL,
+	app.Use(forcessl.Middleware(secure.Options{
+		SSLRedirect:     conf.ForceSSL,
 		SSLProxyHeaders: map[string]string{"X-Forwarded-Proto": "https"},
 	}))
 
 	if ENV == "development" {
-		app.Use(middleware.ParameterLogger)
+		app.Use(paramlogger.ParameterLogger)
 	}
 
 	initializeAuth(app)
-	// Protect against CSRF attacks. https://www.owasp.org/index.php/Cross-Site_Request_Forgery_(CSRF)
-	// Remove to disable this.
-	if conf.EnableCSRFProtection {
-		csrfMiddleware := csrf.New
-		app.Use(csrfMiddleware)
+
+	user, pass, ok := conf.BasicAuth()
+	if ok {
+		app.Use(basicAuth(user, pass))
 	}
 
-	if !conf.Proxy.FilterOff {
-		mf := module.NewFilter(conf.FilterFile)
-		app.Use(mw.NewFilterMiddleware(mf, conf.Proxy.OlympusGlobalEndpoint))
+	if !conf.FilterOff() {
+		mf, err := module.NewFilter(conf.FilterFile)
+		if err != nil {
+			lggr.Fatal(err)
+		}
+		app.Use(mw.NewFilterMiddleware(mf, conf.GlobalEndpoint))
 	}
 
 	// Having the hook set means we want to use it
-	if vHook := conf.Proxy.ValidatorHook; vHook != "" {
-		app.Use(mw.LogEntryMiddleware(mw.NewValidationMiddleware, lggr, vHook))
-	}
-
-	user, pass, ok := conf.Proxy.BasicAuth()
-	if ok {
-		app.Use(basicAuth(user, pass))
+	if vHook := conf.ValidatorHook; vHook != "" {
+		app.Use(mw.NewValidationMiddleware(vHook))
 	}
 
 	if err := addProxyRoutes(app, store, lggr, conf.GoBinary, conf.GoGetWorkers, conf.ProtocolWorkers); err != nil {

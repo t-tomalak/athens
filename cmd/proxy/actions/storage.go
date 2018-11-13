@@ -12,6 +12,7 @@ import (
 	"github.com/gomods/athens/pkg/storage/mem"
 	"github.com/gomods/athens/pkg/storage/minio"
 	"github.com/gomods/athens/pkg/storage/mongo"
+	"github.com/gomods/athens/pkg/storage/s3"
 	"github.com/spf13/afero"
 )
 
@@ -46,10 +47,12 @@ func GetStorage(storageType string, storageConfig *config.StorageConfig) (storag
 		if storageConfig.GCP == nil {
 			return nil, errors.E(op, "Invalid GCP Storage Configuration")
 		}
-		if storageConfig.CDN == nil {
-			return nil, errors.E(op, "Invalid CDN Storage Configuration")
+		return gcp.New(context.Background(), storageConfig.GCP)
+	case "s3":
+		if storageConfig.S3 == nil {
+			return nil, errors.E(op, "Invalid S3 Storage Configuration")
 		}
-		return gcp.New(context.Background(), storageConfig.GCP, storageConfig.CDN)
+		return s3.New(storageConfig.S3)
 	default:
 		return nil, fmt.Errorf("storage type %s is unknown", storageType)
 	}

@@ -1,9 +1,10 @@
 ---
 title: Shared Team Instance
 description: Installing an Athens Instance For Your Development Team
+weight: 2
 ---
 
-When you follow the instructions in the [Walkthrough](/walkthrough), you end up with an Athens Proxy that uses in-memory storage. This is only suitable for trying out the proxy for a short period of time, as you will quickly run out of memory and Athens won't persist modules between restarts. This guide will help you get Athens running in a more suitable manner for scenarios like providing an instance for your development team to share.
+When you follow the instructions in the [Walkthrough](/walkthrough), you end up with an Athens Proxy that uses in-memory storage. This is only suitable for trying out the Athens proxy for a short period of time, as you will quickly run out of memory and Athens won't persist modules between restarts. This guide will help you get Athens running in a more suitable manner for scenarios like providing an instance for your development team to share.
 
 We will use Docker to run the Athens proxy, so first make sure you have Docker [installed](https://docs.docker.com/install/).
 
@@ -119,7 +120,7 @@ When Athens is restarted, it will serve the module from this location without re
 docker rm -f athens-proxy
 ```
 
-Now, we need to clear the local Go modules cache. This is needed so that your local Go command line tool will re-download the module from Athens. The following commands will clear the local module cache:
+Now, we need to clear the local Go modules storage. This is needed so that your local Go command line tool will re-download the module from Athens. The following commands will clear the local module storage:
 
 **Bash**
 ```bash

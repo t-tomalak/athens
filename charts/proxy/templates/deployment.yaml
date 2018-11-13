@@ -28,18 +28,30 @@ spec:
         - name: ATHENS_DISK_STORAGE_ROOT
           value: {{ .Values.storage.disk.storageRoot | quote }}
         {{- else if eq .Values.storage.type "mongo"}}
-        - name: ATHENS_MONGO_CONNECTION_STRING
+        - name: ATHENS_MONGO_STORAGE_URL
           value: {{ .Values.storage.mongo.url | quote }}
         {{- end }}
-        # TODO: re-enable when workers are used
-        #- name: ATHENS_REDIS_QUEUE_ADDRESS
-        #  value: {{ .Values.redis.address | quote }}
+        {{- if .Values.netrc.enabled }}
+        - name: ATHENS_NETRC_PATH
+          value: "/etc/netrc/netrc"
+        {{- end }}
+        {{- if .Values.jaeger.enabled }}
+        - name: ATHENS_TRACE_EXPORTER_URL
+          value: {{ .Values.jaeger.url | quote }}
+        - name: ATHENS_TRACE_EXPORTER
+          value: "jaeger"
+        {{- end }}
         ports:
         - containerPort: 3000
         {{- if eq .Values.storage.type "disk" }}
         volumeMounts:
         - name: storage-volume
           mountPath: {{ .Values.storage.disk.storageRoot | quote }}
+        {{- end }}
+        {{- if .Values.netrc.enabled}}
+        - name: netrc
+          mountPath: "/etc/netrc"
+          readOnly: true
         {{- end }}
       volumes:
       - name: storage-volume
@@ -48,4 +60,9 @@ spec:
           claimName: {{ template "fullname" . }}-storage
       {{- else }}
         emptyDir: {}
+      {{- end }}
+      {{- if .Values.netrc.enabled }}
+      - name: netrc
+        secret:
+          secretName: netrcsecret
       {{- end }}
