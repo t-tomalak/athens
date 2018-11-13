@@ -2,11 +2,6 @@
 # Build your Go project.
 # Add steps that test, save build artifacts, deploy, and more:
 # https://docs.microsoft.com/azure/devops/pipelines/languages/go
-resources:
-  containers:
-    - container: mongoserver
-      image: mongo:3.6-windowsservercore-ltsc2016
-      options: -p 27017:27017
 
 pool:
   vmImage: 'vs2017-win2016'
@@ -18,6 +13,14 @@ variables:
   modulePath: '$(GOPATH)\src\github.com\$(build.repository.name)' # Path to the module's code
 
 steps:
+- task: Docker@1
+  displayName: 'Start mongo'
+  inputs:
+    imageName: mongo:3.6-windowsservercore-ltsc2016
+    containerName: mongoserver
+    ports: 27017
+    comand: run
+
 - powershell: |
     mkdir "$env:GOBIN"
     mkdir "$env:GOPATH\pkg"
