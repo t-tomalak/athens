@@ -18,8 +18,9 @@ steps:
   inputs:
     imageName: mongo:3.6-windowsservercore-ltsc2016
     containerName: mongoserver
+    runInBackground: true
     ports: 27017
-    comand: run
+    action: run
 
 - powershell: |
     mkdir "$env:GOBIN"
