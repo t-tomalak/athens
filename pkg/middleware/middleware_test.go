@@ -2,18 +2,17 @@ package middleware
 
 import (
 	"encoding/json"
-	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/gobuffalo/buffalo"
 	"github.com/gomods/athens/pkg/config"
-	"github.com/gomods/athens/pkg/log"
 	"github.com/gomods/athens/pkg/module"
 	"github.com/markbates/willie"
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
@@ -28,48 +27,67 @@ var (
 	testConfigFile = filepath.Join("..", "..", "config.dev.toml")
 )
 
-func middlewareFilterApp(filterFile, olympusEndpoint string) *buffalo.App {
+func middlewareFilterApp(filterFile, registryEndpoint string) (*buffalo.App, error) {
 	h := func(c buffalo.Context) error {
 		return c.Render(200, nil)
 	}
 
 	a := buffalo.New(buffalo.Options{})
-	mf := newTestFilter(filterFile)
-	a.Use(NewFilterMiddleware(mf, olympusEndpoint))
+	mf, err := newTestFilter(filterFile)
+	if err != nil {
+		return nil, err
+	}
+	a.Use(NewFilterMiddleware(mf, registryEndpoint))
 
 	a.GET(pathList, h)
 	a.GET(pathVersionInfo, h)
-	return a
+	return a, nil
 }
 
-func newTestFilter(filterFile string) *module.Filter {
-	f := module.NewFilter(filterFile)
-	f.AddRule("github.com/gomods/athens/", module.Include)
+func newTestFilter(filterFile string) (*module.Filter, error) {
+	f, err := module.NewFilter(filterFile)
+	if err != nil {
+		return nil, err
+	}
+	f.AddRule("github.com/gomods/athens/", module.Direct)
 	f.AddRule("github.com/athens-artifacts/no-tags", module.Exclude)
-	f.AddRule("github.com/athens-artifacts", module.Direct)
-	return f
+	f.AddRule("github.com/athens-artifacts", module.Include)
+	return f, nil
 }
 
 func Test_FilterMiddleware(t *testing.T) {
 	r := require.New(t)
 
+	filter, err := ioutil.TempFile(os.TempDir(), "filter-")
+	if err != nil {
+		t.FailNow()
+	}
+	defer os.Remove(filter.Name())
+
 	conf, err := config.GetConf(testConfigFile)
 	if err != nil {
 		t.Fatalf("Unable to parse config file: %s", err.Error())
 	}
-	if conf.Proxy == nil {
-		t.Fatalf("No Proxy configuration in test config")
-	}
-	app := middlewareFilterApp(conf.FilterFile, conf.Proxy.OlympusGlobalEndpoint)
+
+	// Test with a filter file not existing
+	app, err := middlewareFilterApp("nofsfile", conf.GlobalEndpoint)
+	r.Nil(app, "app should be nil when a file not exisiting")
+	r.Error(err, "Expected error when a file not existing on the filesystem is given")
+
+	app, err = middlewareFilterApp(filter.Name(), conf.GlobalEndpoint)
+	r.NoError(err, "app should be succesfully created in the test")
 	w := willie.New(app)
 
-	// Public, expects to be redirected to olympus
-	res := w.Request("/github.com/gomods/athens/@v/list").Get()
-	r.Equal(303, res.Code)
-	r.Equal(conf.Proxy.OlympusGlobalEndpoint+"/github.com/gomods/athens/@v/list", res.HeaderMap.Get("Location"))
+	// Public, expects to be redirected to the global registry endpoint, with and without a trailing slash
+	paths := []string{"/github.com/gomods/athens/@v/list/", "/github.com/gomods/athens/@v/list"}
+	for _, path := range paths {
+		res := w.Request(path).Get()
+		r.Equal(303, res.Code)
+		r.Equal(conf.GlobalEndpoint+"/github.com/gomods/athens/@v/list/", res.HeaderMap.Get("Location"))
+	}
 
 	// Excluded, expects a 403
-	res = w.Request("/github.com/athens-artifacts/no-tags/@v/list").Get()
+	res := w.Request("/github.com/athens-artifacts/no-tags/@v/list").Get()
 	r.Equal(403, res.Code)
 
 	// Private, the proxy is working and returns a 200
@@ -83,7 +101,7 @@ func hookFilterApp(hook string) *buffalo.App {
 	}
 
 	a := buffalo.New(buffalo.Options{})
-	a.Use(LogEntryMiddleware(NewValidationMiddleware, log.New("none", logrus.DebugLevel), hook))
+	a.Use(NewValidationMiddleware(hook))
 
 	a.GET(pathList, h)
 	a.GET(pathVersionInfo, h)
@@ -111,7 +129,6 @@ type HookTestsSuite struct {
 }
 
 func (suite *HookTestsSuite) SetupSuite() {
-	fmt.Println("setup")
 	suite.server = httptest.NewServer(&suite.mock)
 	suite.w = willie.New(hookFilterApp(suite.server.URL))
 }

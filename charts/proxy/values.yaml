@@ -39,13 +39,20 @@ storage:
       size: 4Gi
   mongo:
     # you must set this on the command line when you run 'helm install'
-    # for example, you need to run 'helm install --set mongoStorageURL=myurl ...'
+    # for example, you need to run 'helm install --set storage.mongo.url=myurl ...'
     url: "SET THIS ON THE COMMAND LINE"
 
-# Worker is disabled right now. When it's turned on, we can use helm dependencies to start this up!
-#redis:
-#  useEmbedded: false
-#  address: ":6379"
-#  username: 
-#  password:
-#  host:
+netrc:
+  # if enabled, it expects to find the content of a valid .netrc file imported as a secret named netrcsecret
+  enabled: false
+
+jaeger:
+  ## Type of service; valid values are "ClusterIP", "LoadBalancer", and "NodePort".
+  type: ClusterIP
+  image:
+    repository: jaegertracing/all-in-one
+    tag: latest
+  enabled: true
+  # you must set this on the command line when you run 'helm install'
+  # for example, you need to run 'helm install --set jaeger.url=myurl ...'
+  url: "SET THIS ON THE COMMAND LINE"

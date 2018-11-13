@@ -1,0 +1,45 @@
+# Go
+# Build your Go project.
+# Add steps that test, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/go
+
+pool:
+  vmImage: 'vs2017-win2016'
+
+variables:
+  GOBIN:  '$(GOPATH)\bin' # Go binaries path
+  GOPATH: '$(system.defaultWorkingDirectory)\gopath' # Go workspace path
+  GO111MODULE: 'on'
+  modulePath: '$(GOPATH)\src\github.com\$(build.repository.name)' # Path to the module's code
+
+steps:
+- task: Docker@1
+  displayName: 'Start mongo'
+  inputs:
+    imageName: mongo:3.6-windowsservercore-ltsc2016
+    containerName: mongoserver
+    runInBackground: true
+    ports: 27017
+    command: 'run'
+
+- powershell: |
+    mkdir "$env:GOBIN"
+    mkdir "$env:GOPATH\pkg"
+    mkdir "$env:modulePath"
+    robocopy "$env:system_defaultWorkingDirectory\" "$env:modulePath\" /E /Z /ZB /R:5 /W:5 /TBD /NP /V /XD "$env:GOPATH"
+    exit ($LastExitCode -band 24)
+  displayName: 'Set up the Go workspace'
+
+- powershell: |
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri "https://dl.minio.io/server/minio/release/windows-amd64/minio.exe" -OutFile "minio.exe"
+    Start-Process -NoNewWindow minio.exe 'server --address ":9001" .'
+    go build -mod=vendor ./cmd/proxy
+    go test -mod=vendor -race ./...
+  env:
+    ATHENS_MINIO_ENDPOINT: "127.0.0.1:9001"
+    ATHENS_MONGO_STORAGE_URL: "mongodb://mongoserver:27017"
+    MINIO_ACCESS_KEY: "minio"
+    MINIO_SECRET_KEY: "minio123"
+  workingDirectory: '$(modulePath)'
+  displayName: 'Build & test proxy'
