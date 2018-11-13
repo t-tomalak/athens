@@ -20,7 +20,7 @@ steps:
     containerName: mongoserver
     runInBackground: true
     ports: 27017
-    action: 'run'
+    command: 'run'
 
 - powershell: |
     mkdir "$env:GOBIN"
